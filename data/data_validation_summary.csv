@@ -1,0 +1,15 @@
+Metric,Value
+Total Records,5004
+Total Features,25
+Numerical Features,12
+Categorical Features,8
+Missing Values (Total),50
+Missing Values (Percentage),0.04%
+Duplicate Records,0
+Duplicate Percentage,0.00%
+Target Distribution (Success),"1,812 (36.21%)"
+Target Distribution (Failure),"3,192 63.79%)"
+Success Rate,36.21%
+Outliers Treated,Yes (Capped using IQR)
+New Features Created,10
+Memory Usage (MB),1.54
