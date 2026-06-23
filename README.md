@@ -160,12 +160,9 @@ jupyter notebook
 # → notebooks/model_training.ipynb
 ```
 
-### 5. Launch the App
+### 5.🌐 Live Application
 
-```
-Open **[http://localhost:8501](https://freelance-job-success-prediction-bid-recommendation-system-qif.streamlit.app/)**
-this link in Browser
----
+**Access the deployed app here:** [Freelance Job Success Prediction & Bid Recommendation System](https://freelance-job-success-prediction-bid-recommendation-system-qif.streamlit.app/)
 
 ## 📊 How to Use
 
