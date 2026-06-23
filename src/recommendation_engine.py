@@ -1,6 +1,8 @@
 # ============================================================
-# Phase 4: Intelligent Bid Recommendation Engine (FIXED)
+# Phase 4: Intelligent Bid Recommendation Engine
 # File: src/recommendation_engine.py
+# Purpose: Convert prediction probabilities into actionable
+#          business recommendations
 # ============================================================
 
 import pandas as pd
@@ -28,21 +30,27 @@ class BidRecommendationEngine:
     ):
         """
         Initialize the recommendation engine with trained model
+
+        Parameters:
+        -----------
+        model_path : str
+            Path to the trained model file
+        scaler_path : str
+            Path to the scaler file
+        threshold_path : str
+            Path to the threshold file
         """
         self.model = joblib.load(model_path)
         self.scaler = joblib.load(scaler_path)
+        self.threshold = (
+            joblib.load(threshold_path) if os.path.exists(threshold_path) else 0.40
+        )
 
-        # Load threshold
-        if os.path.exists(threshold_path):
-            self.threshold = joblib.load(threshold_path)
-        else:
-            self.threshold = 0.40
-
-        # IMPORTANT: Get feature names from scaler
+        # Get feature names from scaler (MUST MATCH TRAINING)
         if hasattr(self.scaler, "feature_names_in_"):
             self.feature_columns = list(self.scaler.feature_names_in_)
         else:
-            # Fallback: use training features
+            # Fallback features (should match training)
             self.feature_columns = [
                 "project_budget",
                 "client_rating",
@@ -56,14 +64,14 @@ class BidRecommendationEngine:
                 "project_category_encoded",
                 "client_location_encoded",
                 "freelancer_country_encoded",
+                "client_rating_category_encoded",
+                "experience_level_encoded",
                 "experience_quality_interaction",
                 "combined_experience_rating",
-                # Additional features from training
                 "proposal_quality_score_x_freelancer_rating",
                 "proposal_quality_score_x_freelancer_experience",
                 "client_rating_x_freelancer_rating",
-                "client_rating_category_encoded",
-                "experience_level_encoded",
+                "rating_per_proposal",
             ]
 
         print(f"✅ Bid Recommendation Engine initialized successfully!")
@@ -74,6 +82,15 @@ class BidRecommendationEngine:
     def prepare_features(self, input_data):
         """
         Prepare features for prediction with all required columns
+
+        Parameters:
+        -----------
+        input_data : dict or DataFrame
+            Raw input data from user
+
+        Returns:
+        --------
+        numpy array : Scaled feature array
         """
         # Convert to DataFrame if dict
         if isinstance(input_data, dict):
@@ -103,6 +120,7 @@ class BidRecommendationEngine:
                     "budget_per_proposal",
                     "experience_quality_interaction",
                     "combined_experience_rating",
+                    "rating_per_proposal",
                 ]:
                     X[col] = 0
                 elif col in [
@@ -114,7 +132,6 @@ class BidRecommendationEngine:
                 ]:
                     X[col] = 0
                 elif "x_" in col:  # Interaction features
-                    # Try to compute from existing columns
                     parts = col.split("_x_")
                     if len(parts) == 2:
                         col1, col2 = parts
@@ -134,13 +151,31 @@ class BidRecommendationEngine:
         X = X.fillna(0)
 
         # Scale features
-        X_scaled = self.scaler.transform(X)
+        try:
+            X_scaled = self.scaler.transform(X)
+        except Exception as e:
+            print(f"⚠️ Scaling error: {e}")
+            # Ensure correct order if scaler has feature names
+            if hasattr(self.scaler, "feature_names_in_"):
+                X = X[self.scaler.feature_names_in_]
+                X_scaled = self.scaler.transform(X)
+            else:
+                X_scaled = self.scaler.transform(X)
 
         return X_scaled
 
     def predict_success_probability(self, input_data):
         """
         Predict success probability for a project
+
+        Parameters:
+        -----------
+        input_data : dict or DataFrame
+            Project details
+
+        Returns:
+        --------
+        float : Success probability (0-1)
         """
         X_scaled = self.prepare_features(input_data)
         probability = self.model.predict_proba(X_scaled)[:, 1][0]
@@ -149,6 +184,15 @@ class BidRecommendationEngine:
     def get_recommendation(self, probability):
         """
         Generate recommendation based on probability
+
+        Parameters:
+        -----------
+        probability : float
+            Success probability (0-1)
+
+        Returns:
+        --------
+        dict : Recommendation details
         """
         if probability >= 0.70:
             return {
@@ -205,14 +249,25 @@ class BidRecommendationEngine:
     def get_full_recommendation(self, input_data):
         """
         Get complete recommendation with all details
+
+        Parameters:
+        -----------
+        input_data : dict or DataFrame
+            Project details
+
+        Returns:
+        --------
+        dict : Complete recommendation
         """
         probability = self.predict_success_probability(input_data)
         recommendation = self.get_recommendation(probability)
 
+        # Add additional insights
         recommendation["probability"] = probability
         recommendation["threshold"] = self.threshold
         recommendation["timestamp"] = datetime.now().isoformat()
 
+        # Add decision logic explanation
         if probability >= self.threshold:
             recommendation["decision"] = "PROCEED"
             recommendation["decision_reason"] = (
@@ -229,6 +284,15 @@ class BidRecommendationEngine:
     def batch_recommendations(self, data):
         """
         Generate recommendations for multiple projects
+
+        Parameters:
+        -----------
+        data : DataFrame
+            Multiple project records
+
+        Returns:
+        --------
+        DataFrame : Predictions and recommendations
         """
         X_scaled = self.prepare_features(data)
         probabilities = self.model.predict_proba(X_scaled)[:, 1]
@@ -254,9 +318,17 @@ class BidRecommendationEngine:
     ):
         """
         Generate detailed recommendation report
+
+        Parameters:
+        -----------
+        input_data : dict or DataFrame
+            Project details
+        output_file : str
+            Output file path
         """
         recommendation = self.get_full_recommendation(input_data)
 
+        # Create detailed report
         report = {
             "timestamp": datetime.now().isoformat(),
             "recommendation": recommendation,
@@ -272,6 +344,7 @@ class BidRecommendationEngine:
             },
         }
 
+        # Save to file
         os.makedirs(os.path.dirname(output_file), exist_ok=True)
         with open(output_file, "w") as f:
             json.dump(report, f, indent=4, default=str)
@@ -306,21 +379,61 @@ class BidRecommendationEngine:
 
 
 # ============================================================
-# Helper Functions
+# Standalone Functions for Easy Use
 # ============================================================
 
 
-def get_feature_names_from_model(
-    model_path="models/best_model.pkl", scaler_path="models/scaler.pkl"
+def get_recommendation_from_input(
+    project_budget,
+    client_rating,
+    num_existing_proposals,
+    freelancer_experience,
+    proposal_quality_score,
+    project_duration,
+    freelancer_rating,
+    previous_jobs_completed,
+    budget_per_proposal,
+    project_category_encoded,
+    client_location_encoded,
+    freelancer_country_encoded,
+    client_rating_category_encoded,
+    experience_level_encoded,
+    experience_quality_interaction,
+    combined_experience_rating,
+    rating_per_proposal,
+    proposal_quality_score_x_freelancer_rating,
+    proposal_quality_score_x_freelancer_experience,
+    client_rating_x_freelancer_rating,
 ):
     """
-    Get the feature names used by the model
+    Quick function to get recommendation from individual inputs
     """
-    scaler = joblib.load(scaler_path)
-    if hasattr(scaler, "feature_names_in_"):
-        return list(scaler.feature_names_in_)
-    else:
-        return None
+    engine = BidRecommendationEngine()
+
+    input_data = {
+        "project_budget": project_budget,
+        "client_rating": client_rating,
+        "num_existing_proposals": num_existing_proposals,
+        "freelancer_experience": freelancer_experience,
+        "proposal_quality_score": proposal_quality_score,
+        "project_duration": project_duration,
+        "freelancer_rating": freelancer_rating,
+        "previous_jobs_completed": previous_jobs_completed,
+        "budget_per_proposal": budget_per_proposal,
+        "project_category_encoded": project_category_encoded,
+        "client_location_encoded": client_location_encoded,
+        "freelancer_country_encoded": freelancer_country_encoded,
+        "client_rating_category_encoded": client_rating_category_encoded,
+        "experience_level_encoded": experience_level_encoded,
+        "experience_quality_interaction": experience_quality_interaction,
+        "combined_experience_rating": combined_experience_rating,
+        "rating_per_proposal": rating_per_proposal,
+        "proposal_quality_score_x_freelancer_rating": proposal_quality_score_x_freelancer_rating,
+        "proposal_quality_score_x_freelancer_experience": proposal_quality_score_x_freelancer_experience,
+        "client_rating_x_freelancer_rating": client_rating_x_freelancer_rating,
+    }
+
+    return engine.get_full_recommendation(input_data)
 
 
 # ============================================================
@@ -330,11 +443,6 @@ def get_feature_names_from_model(
 if __name__ == "__main__":
     # Initialize engine
     engine = BidRecommendationEngine()
-
-    # Get feature names for reference
-    print("\n📋 Required Features:")
-    for i, feat in enumerate(engine.feature_columns, 1):
-        print(f"   {i}. {feat}")
 
     # Example 1: High probability project
     high_prob_project = {
@@ -348,16 +456,16 @@ if __name__ == "__main__":
         "previous_jobs_completed": 200,
         "budget_per_proposal": 833.33,
         "project_category_encoded": 0,
-        "client_location_encoded": 3,
+        "client_location_encoded": 8,
         "freelancer_country_encoded": 3,
+        "client_rating_category_encoded": 0,
+        "experience_level_encoded": 1,
         "experience_quality_interaction": 90,
         "combined_experience_rating": 80.5,
-        # Interaction features (will be auto-calculated if missing)
+        "rating_per_proposal": 0.78,
         "proposal_quality_score_x_freelancer_rating": 42.3,
         "proposal_quality_score_x_freelancer_experience": 90,
         "client_rating_x_freelancer_rating": 22.56,
-        "client_rating_category_encoded": 0,
-        "experience_level_encoded": 1,
     }
 
     print("\n" + "=" * 60)
@@ -368,7 +476,6 @@ if __name__ == "__main__":
     print(f"\n📊 Success Probability: {result['probability']*100:.1f}%")
     print(f"📊 Status: {result['status']}")
     print(f"📊 Action: {result['action']}")
-    print(f"📊 Decision: {result['decision']}")
     print(f"\n📋 Recommendations:")
     for rec in result["recommendations"]:
         print(f"   • {rec}")
@@ -387,13 +494,14 @@ if __name__ == "__main__":
         "project_category_encoded": 5,
         "client_location_encoded": 2,
         "freelancer_country_encoded": 4,
+        "client_rating_category_encoded": 1,
+        "experience_level_encoded": 2,
         "experience_quality_interaction": 6,
         "combined_experience_rating": 15.5,
+        "rating_per_proposal": 0.02,
         "proposal_quality_score_x_freelancer_rating": 6.3,
         "proposal_quality_score_x_freelancer_experience": 6,
         "client_rating_x_freelancer_rating": 3.15,
-        "client_rating_category_encoded": 1,
-        "experience_level_encoded": 2,
     }
 
     print("\n" + "=" * 60)
@@ -428,13 +536,14 @@ if __name__ == "__main__":
                 "project_category_encoded": 0,
                 "client_location_encoded": 8,
                 "freelancer_country_encoded": 5,
+                "client_rating_category_encoded": 0,
+                "experience_level_encoded": 1,
                 "experience_quality_interaction": 120,
                 "combined_experience_rating": 115.3,
+                "rating_per_proposal": 0.35,
                 "proposal_quality_score_x_freelancer_rating": 36.8,
                 "proposal_quality_score_x_freelancer_experience": 120,
                 "client_rating_x_freelancer_rating": 20.7,
-                "client_rating_category_encoded": 0,
-                "experience_level_encoded": 1,
             },
             {
                 "project_budget": 15000,
@@ -449,13 +558,14 @@ if __name__ == "__main__":
                 "project_category_encoded": 5,
                 "client_location_encoded": 2,
                 "freelancer_country_encoded": 4,
+                "client_rating_category_encoded": 1,
+                "experience_level_encoded": 2,
                 "experience_quality_interaction": 12,
                 "combined_experience_rating": 20.5,
+                "rating_per_proposal": 0.04,
                 "proposal_quality_score_x_freelancer_rating": 11.2,
                 "proposal_quality_score_x_freelancer_experience": 12,
                 "client_rating_x_freelancer_rating": 7.0,
-                "client_rating_category_encoded": 1,
-                "experience_level_encoded": 2,
             },
         ]
     )
