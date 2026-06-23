@@ -162,12 +162,9 @@ jupyter notebook
 
 ### 5. Launch the App
 
-```bash
-streamlit run app/app.py
 ```
-
-Open **http://localhost:8501** in your browser.
-
+Open **[http://localhost:8501](https://freelance-job-success-prediction-bid-recommendation-system-qif.streamlit.app/)**
+this link in Browser
 ---
 
 ## 📊 How to Use
